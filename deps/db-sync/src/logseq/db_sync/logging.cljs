@@ -4,6 +4,8 @@
 
 (defn install!
   "Installs console logging and sets the root logger level to `:info`."
-  []
-  (glogi-console/install!)
-  (log/set-level :glogi/root :info))
+  ([]
+   (install! :info))
+  ([level]
+   (glogi-console/install!)
+   (log/set-level :glogi/root level)))
