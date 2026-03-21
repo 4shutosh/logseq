@@ -194,7 +194,13 @@
   (set! (.-onmessage ws)
         (fn [event]
           (touch-last-ws-message! client)
-          (sync-handle-message/handle-message! repo client (.-data event))))
+          (-> (sync-handle-message/handle-message! repo client (.-data event))
+              (p/catch (fn [e]
+                         (js/console.error "[sync] handle-message failed" e)
+                         (log/error :db-sync/handle-message-failed {:repo repo :error e})
+                         (shared-service/broadcast-to-clients!
+                          :notification
+                          [[(str "Sync error: " (ex-message e))] :error]))))))
   (set! (.-onerror ws) (fn [error] (log/error :db-sync/ws-error error)))
   (set! (.-onclose ws)
         (fn [_]

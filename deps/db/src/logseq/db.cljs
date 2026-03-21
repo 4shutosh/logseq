@@ -115,12 +115,17 @@
         (let [tx-report* (d/with db tx-data tx-meta)
               pipeline-f @*transact-pipeline-fn
               tx-report (if-let [f pipeline-f] (f tx-report*) tx-report*)
-              _ (throw-if-page-has-block-parent! (:db-after tx-report) (:tx-data tx-report))
+              _ (when-not (:rtc-tx? tx-meta)
+                  (throw-if-page-has-block-parent! (:db-after tx-report) (:tx-data tx-report)))
               [validate-result errors] (db-validate/validate-tx-report tx-report nil)]
           (cond
-            validate-result
+            (or validate-result (:rtc-tx? tx-meta))
             (when (and tx-report (seq (:tx-data tx-report)))
               ;; perf enhancement: avoid repeated call on `d/with`
+              (when (and (not validate-result) (seq errors))
+                ;; notify ui about validation issues but don't block sync
+                (when-let [f @*transact-invalid-callback]
+                  (f tx-report errors)))
               (reset! conn (:db-after tx-report))
               (dc/store-after-transact! conn tx-report)
               (dc/run-callbacks conn tx-report))

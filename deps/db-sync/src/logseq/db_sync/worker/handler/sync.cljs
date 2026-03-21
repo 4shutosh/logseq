@@ -325,7 +325,8 @@
   [conn {:keys [tx outliner-op]}]
   (let [tx-data (sanitize-client-tx-data conn tx)]
     (when (seq tx-data)
-      (ldb/transact! conn tx-data (cond-> {:op :apply-client-tx}
+      (ldb/transact! conn tx-data (cond-> {:op :apply-client-tx
+                                           :skip-validate-db? true}
                                     outliner-op (assoc :outliner-op outliner-op))))))
 
 (defn- db-transact-failed-response

@@ -668,14 +668,18 @@
                                 payload (mapv (fn [{:keys [tx-data outliner-op]}]
                                                 (cond-> {:tx (sqlite-util/write-transit-str tx-data)}
                                                   outliner-op
-                                                  (assoc :outliner-op outliner-op)))
+                                                  (assoc :outliner-op (if (keyword? outliner-op)
+                                                                         (name outliner-op)
+                                                                         outliner-op))))
                                               tx-entries*)]
                           (reset! (:inflight client) tx-ids)
                           (send! ws {:type "tx/batch"
                                      :t-before local-tx
                                      :txs payload}))
                         (p/catch (fn [error]
-                                   (js/console.error error))))))))))))))
+                                   (shared-service/broadcast-to-clients!
+                                    :notification
+                                    [[(str "Sync push failed: " (ex-message error))] :error]))))))))))))))
 
 (defn- combine-tx-reports
   [tx-reports]
@@ -761,9 +765,11 @@
          index 0
          results []]
     (if-let [remote-tx (first remaining)]
-      (let [tx-data (->> (:tx-data remote-tx)
+      (let [db @temp-conn
+            tx-data (->> (:tx-data remote-tx)
                          rewrite-recreated-lookup-refs
-                         (sanitize-tx-data @temp-conn)
+                         (replace-string-block-tempids-with-lookups db)
+                         (sanitize-tx-data db)
                          seq)
             results' (cond-> results
                        tx-data
@@ -1068,26 +1074,30 @@
                         (apply-remote-tx-with-local-changes! apply-context)
                         (apply-remote-tx-without-local-changes! apply-context))
                       (catch :default error
-                        (log/error :db-sync/apply-remote-txs-failed
-                                   {:repo repo
-                                    :has-local-changes? has-local-changes?
-                                    :remote-tx-count (count remote-txs)
-                                    :local-tx-count (count local-txs)
-                                    :remote-txs (mapv (fn [{:keys [t outliner-op tx-data]}]
-                                                        {:t t
-                                                         :outliner-op outliner-op
-                                                         :tx-data-count (count tx-data)
-                                                         :tx-data-preview (take 12 tx-data)})
-                                                      remote-txs)
-                                    :local-txs (mapv (fn [{:keys [tx-id outliner-op tx reversed-tx]}]
-                                                       {:tx-id tx-id
-                                                        :outliner-op outliner-op
-                                                        :tx-count (count tx)
-                                                        :tx-preview (take 12 tx)
-                                                        :reversed-count (count reversed-tx)
-                                                        :reversed-preview (take 12 reversed-tx)})
-                                                     local-txs)
-                                    :error error})
+                        (do
+                          (log/error :db-sync/apply-remote-txs-failed
+                                     {:repo repo
+                                      :has-local-changes? has-local-changes?
+                                      :remote-tx-count (count remote-txs)
+                                      :local-tx-count (count local-txs)
+                                      :remote-txs (mapv (fn [{:keys [t outliner-op tx-data]}]
+                                                          {:t t
+                                                           :outliner-op outliner-op
+                                                           :tx-data-count (count tx-data)
+                                                           :tx-data-preview (take 12 tx-data)})
+                                                        remote-txs)
+                                      :local-txs (mapv (fn [{:keys [tx-id outliner-op tx reversed-tx]}]
+                                                         {:tx-id tx-id
+                                                          :outliner-op outliner-op
+                                                          :tx-count (count tx)
+                                                          :tx-preview (take 12 tx)
+                                                          :reversed-count (count reversed-tx)
+                                                          :reversed-preview (take 12 reversed-tx)})
+                                                       local-txs)
+                                      :error error})
+                          (shared-service/broadcast-to-clients!
+                           :notification
+                           [[(str "Sync failed: " (ex-message error))] :error]))
                         (throw error)))
           remote-tx-report @*remote-tx-report]
       (when has-local-changes?

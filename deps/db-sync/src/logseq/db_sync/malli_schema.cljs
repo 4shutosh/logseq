@@ -5,13 +5,13 @@
 (def tx-entry-schema
   [:map
    [:tx :string]
-   [:outliner-op {:optional true} [:maybe :keyword]]])
+   [:outliner-op {:optional true} :any]])
 
 (def tx-log-entry-schema
   [:map
    [:t :int]
    [:tx :string]
-   [:outliner-op {:optional true} [:maybe :keyword]]])
+   [:outliner-op {:optional true} :any]])
 
 (def ws-client-message-schema
   [:multi {:dispatch :type}

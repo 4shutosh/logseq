@@ -130,6 +130,17 @@
                            :local-checksum local-checksum
                            :remote-checksum remote-checksum}))))))
 
+(defn- handle-server-error!
+  [repo client message]
+  (let [error-msg (or (:message message) "unknown server error")]
+    (js/console.error "[sync] server error response" error-msg)
+    (log/error :db-sync/server-error {:repo repo :error error-msg})
+    (when-let [inflight (:inflight client)]
+      (reset! inflight []))
+    (shared-service/broadcast-to-clients!
+     :notification
+     [[(str "Sync server error: " error-msg)] :warning])))
+
 (defn- handle-tx-reject!
   [repo client message local-tx]
   (let [reason (:reason message)
@@ -141,8 +152,11 @@
       (require-non-negative remote-tx {:repo repo :type "tx/reject"}))
     (case reason
       "stale"
-      (when (and (:ws client) (ws-open? (:ws client)))
-        (send! (:ws client) {:type "pull" :since local-tx}))
+      (do
+        (when-let [inflight (:inflight client)]
+          (reset! inflight []))
+        (when (and (:ws client) (ws-open? (:ws client)))
+          (send! (:ws client) {:type "pull" :since local-tx})))
 
       (let [data (when-let [raw-data (:data message)]
                    (parse-transit raw-data
@@ -257,5 +271,6 @@
         "pull/ok" (handle-pull-ok! repo client local-tx remote-tx remote-checksum message)
         "changed" (handle-changed! repo client local-tx remote-tx)
         "tx/reject" (handle-tx-reject! repo client message local-tx)
+        "error" (handle-server-error! repo client message)
         (fail-fast :db-sync/invalid-field
                    {:repo repo :type (:type message)})))))
